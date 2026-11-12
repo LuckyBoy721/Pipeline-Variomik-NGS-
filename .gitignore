@@ -2,7 +2,7 @@
 /scripts/
 
 # Abaikan isi raw_data, kecuali file yang ditentukan
-/raw_data
+/raw_data/*
 
 # Abaikan isi ref_genome, kecuali file yang ditentukan
 /ref_genome/*
