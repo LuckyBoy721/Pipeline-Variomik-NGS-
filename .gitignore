@@ -1,0 +1,17 @@
+# Abaikan folder scripts sepenuhnya
+/scripts/
+
+# Abaikan isi raw_data, kecuali file yang ditentukan
+/raw_data
+
+# Abaikan isi ref_genome, kecuali file yang ditentukan
+/ref_genome/*
+!/ref_genome/Enterococcus_NC_017022.1.fasta
+
+# Abaikan isi reports, kecuali file yang ditentukan
+/reports/*
+!/reports/rqc_report.html
+
+# Abaikan isi results, kecuali file yang ditentukan
+/results/*
+!/results/clean_sample.fastq.gz

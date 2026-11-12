@@ -1,0 +1,24 @@
+---
+title: "coba"
+author: "Muhammad Fahmi Syihab"
+date: "2026-11-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+a <- 8
+cat(a)
+```
+
+vhjjh jnjjijklyggg guiyi hyuyut uiuh
+
+gyhgyu vtruygghjjk u8ottuyuihjjjhv 
+
+```{r}
+```
+

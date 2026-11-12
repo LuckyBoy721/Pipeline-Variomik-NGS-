@@ -1,0 +1,1130 @@
+---
+title: "Pipeline Variomik NGS"
+author: "Muhammad Fahmi Syihab"
+date: "2026-10-27"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library ( ShortRead )
+library ( Biostrings )
+library ( Rqc )
+library ( Rsubread )
+library ( Rsamtools )
+library ( VariantAnnotation )
+library ( ggplot2 )
+
+if (!dir.exists("raw_data"))dir.create("raw_data", showWarnings = FALSE)
+if (!dir.exists("ref_genome"))dir.create("ref_genome", showWarnings = FALSE)
+if (!dir.exists("results"))dir.create("results", showWarnings = FALSE)
+if (!dir.exists("scripts"))dir.create("scripts", showWarnings = FALSE)
+if (!dir.exists("reports"))dir.create("reports", showWarnings = FALSE)
+
+cat("Lingkungan kerja R berhasil disiapkan!\n")
+```
+
+```{r}
+sra_id <- "SRR8500451" 
+```
+
+## Mengunduh file
+
+```{r}
+#mengambil file dari ena
+ena_url <- paste0(
+  "https://www.ebi.ac.uk/ena/portal/api/filereport?",
+  "accession=", sra_id,
+  "&result=read_run",
+  "&fields=run_accession,fastq_ftp",
+  "&format=tsv"
+)
+
+ena_info <- read.delim(
+  ena_url,
+  sep = "\t",
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+print(ena_info)
+
+# Memastikan tautan FASTQ tersedia
+if (nrow(ena_info) == 0 ||
+    is.na(ena_info$fastq_ftp[1]) ||
+    ena_info$fastq_ftp[1] == "") {
+  stop("Tautan FASTQ tidak ditemukan di ENA.")
+}
+
+```
+
+```{r}
+fastq_files <- strsplit(
+  ena_info$fastq_ftp[1],
+  ";",
+  fixed = TRUE
+)[[1]]
+
+fastq_urls <- sub(
+  "^ftp://",
+  "https://",
+  fastq_files
+)
+
+# Jika tautan tidak memiliki protokol, tambahkan HTTPS
+fastq_urls <- ifelse(
+  grepl("^https?://", fastq_urls),
+  fastq_urls,
+  paste0("https://", fastq_urls)
+)
+
+file_paths <- file.path(
+  "raw_data",
+  basename(fastq_files)
+)
+
+#mengunduh fastq
+options(timeout = 4800)
+
+for (i in seq_along(fastq_urls)) {
+
+  cat("\nMengunduh file:", basename(file_paths[i]), "\n")
+
+  download.file(
+    url = fastq_urls[i],
+    destfile = file_paths[i],
+    mode = "wb",
+    method = "libcurl"
+  )
+}
+
+cat("\nProses unduhan selesai!\n")
+
+
+# ukuran file
+print(
+  data.frame(
+    Nama_File = basename(file_paths),
+    Ukuran_MB = round(
+      file.info(file_paths)$size / (1024^2),
+      2
+    )
+  )
+)
+
+```
+
+```{r}
+
+
+#resume download fastq
+curl_exe <- Sys.which("curl.exe")
+
+if (curl_exe == "") {
+  curl_exe <- Sys.which("curl")
+}
+
+if (curl_exe == "") {
+  stop("curl.exe tidak ditemukan di Windows.")
+}
+
+# Menampilkan versi curl
+system2(curl_exe, "--version")
+
+# Mengatur jumlah percobaan
+maks_percobaan <- 10
+
+# Mengunduh setiap file
+for (i in seq_along(fastq_urls)) {
+
+  cat("\n====================================\n")
+  cat("File:", basename(file_paths[i]), "\n")
+  cat("====================================\n")
+
+  berhasil <- FALSE
+
+  for (percobaan in 1:maks_percobaan) {
+
+    cat(
+      "\nPercobaan ke-",
+      percobaan,
+      " dari ",
+      maks_percobaan,
+      "\n",
+      sep = ""
+    )
+
+    status <- system2(
+      curl_exe,
+      args = c(
+        "--location",
+        "--fail",
+        "--connect-timeout", "60",
+        "--continue-at", "-",
+        "--output", file_paths[i],
+        fastq_urls[i]
+      )
+    )
+
+    if (status == 0) {
+      berhasil <- TRUE
+      cat("\nUnduhan selesai:", basename(file_paths[i]), "\n")
+      break
+    }
+
+    if (percobaan < maks_percobaan) {
+      cat("Koneksi gagal. Mencoba melanjutkan dalam 5 detik...\n")
+      Sys.sleep(5)
+    }
+  }
+
+  if (!berhasil) {
+    stop(
+      paste(
+        "Unduhan belum selesai:",
+        basename(file_paths[i]),
+        "- jalankan kembali kode ini nanti."
+      )
+    )
+  }
+}
+
+cat("\nUkuran file hasil unduhan:\n")
+
+print(
+  data.frame(
+    Nama_File = basename(file_paths),
+    Ukuran_Byte = file.info(file_paths)$size,
+    Ukuran_MB = round(
+      file.info(file_paths)$size / (1024^2),
+      2
+    )
+  )
+)
+
+```
+
+## Tahap 1: Automated Quality Control (Rqc) & Pre-processing
+
+```{r}
+library(BiocParallel)
+
+register(SerialParam())
+
+# rqc data di raw_data
+rqc_resultSet_before <- rqc(
+  path = "raw_data",
+  pattern = paste0("^", sra_id, "_1","\\.fastq\\.gz$"),
+  sample = TRUE,
+  n = 1000,
+  group = "Raw_Data",
+  openBrowser = FALSE
+)
+
+rqcReport(rqc_resultSet_before, outdir = "reports")
+
+# tampilkan plot kualitas per basa di r console
+
+rqcCycleQualityPlot(rqc_resultSet_before)
+rqcCycleGCPlot(rqc_resultSet_before)
+```
+
+```{r}
+fastq_path <- list.files("raw_data", pattern = paste0("^", sra_id, "_1","\\.fastq\\.gz$"), full.names = TRUE)[1]
+
+cat("Membaca file:", fastq_path, "\n")
+
+fq <- readFastq(fastq_path)
+print(fq)
+
+qual_test <- as(quality(fq)[1:5], "matrix")
+
+# Melihat ukuran matriks
+dim(qual_test)
+
+mean_q_test <- rowMeans(qual_test)
+
+print(qual_test[1, ])
+
+# Melihat rata-rata kualitas 5 read
+print(mean_q_test)
+```
+
+```{r}
+# File FASTQ input
+fastq_path <- "raw_data/SRR8500451_1.fastq.gz"
+
+# Memeriksa keberadaan file
+if (!file.exists(fastq_path)) {
+  stop("File FASTQ tidak ditemukan di folder raw_data!")
+}
+
+# Ukuran pembacaan setiap chunk
+chunk_size <- 50000
+
+# Ambang batas filtering yang akan diuji
+thresholds <- c(15, 20, 25)
+
+# Rentang skor Phred yang digunakan untuk pencatatan distribusi
+phred_levels <- 0:93
+
+
+# C. FUNGSI PERHITUNGAN PHRED
+# ------------------------------------------------------------
+
+# Menghitung median berdasarkan frekuensi skor Phred
+get_phred_median <- function(counts) {
+
+  total <- sum(counts)
+
+  if (total == 0) {
+    return(NA_real_)
+  }
+
+  lower_position <- floor((total + 1) / 2)
+  upper_position <- ceiling((total + 1) / 2)
+
+  lower_value <- which(cumsum(counts) >= lower_position)[1] - 1
+  upper_value <- which(cumsum(counts) >= upper_position)[1] - 1
+
+  return(mean(c(lower_value, upper_value)))
+}
+
+
+# D. UJI COBA MULTI-THRESHOLD FILTERING
+# ------------------------------------------------------------
+
+# Variabel penyimpanan hasil filtering
+total_reads <- 0L
+
+reads_pass <- setNames(
+  numeric(length(thresholds)),
+  paste0("Q", thresholds)
+)
+
+# Matriks untuk menyimpan distribusi skor Phred
+phred_counts_filter <- matrix(
+  0,
+  nrow = length(phred_levels),
+  ncol = length(thresholds),
+  dimnames = list(
+    phred_levels,
+    paste0("Q", thresholds)
+  )
+)
+
+# Membaca FASTQ secara bertahap
+stream <- FastqStreamer(fastq_path, n = chunk_size)
+
+open(stream)
+
+tryCatch({
+
+  repeat {
+
+    # Membaca satu chunk
+    fq_chunk <- yield(stream)
+
+    if (length(fq_chunk) == 0L) {
+      break
+    }
+
+    total_reads <- total_reads + length(fq_chunk)
+
+    # Mengubah skor kualitas menjadi matriks numerik
+    qual_test <- as(quality(fq_chunk), "matrix")
+
+    # Menghitung rata-rata Phred setiap read
+    mean_q <- rowMeans(qual_test, na.rm = TRUE)
+
+    # Menguji ketiga ambang batas
+    for (j in seq_along(thresholds)) {
+
+      threshold <- thresholds[j]
+
+      # Filter berdasarkan rata-rata kualitas
+      pass_filter <- !is.na(mean_q) & mean_q >= threshold
+
+      reads_pass[j] <- reads_pass[j] + sum(pass_filter)
+
+      # Menghitung distribusi Phred dari read yang lolos
+      if (any(pass_filter)) {
+
+        q_values <- as.integer(
+          qual_test[pass_filter, , drop = FALSE]
+        )
+
+        if (anyNA(q_values) ||
+            any(q_values < 0 | q_values > 93)) {
+          stop("Ditemukan skor Phred di luar rentang 0-93.")
+        }
+
+        phred_counts_filter[, j] <-
+          phred_counts_filter[, j] +
+          tabulate(q_values + 1L, nbins = 94L)
+
+      }
+
+    }
+
+    cat("Total read diproses:", total_reads, "\n")
+
+  }
+
+}, finally = {
+  close(stream)
+})
+
+
+# E. MEMBUAT SUMMARY HASIL FILTERING
+# ------------------------------------------------------------
+
+hasil_filtering <- data.frame(
+
+  threshold = thresholds,
+
+  total_read = total_reads,
+
+  read_lolos_filter = as.numeric(reads_pass),
+
+  survival_rate = round(
+    as.numeric(reads_pass) / total_reads * 100,
+    2
+  ),
+
+  mean_phred = sapply(seq_along(thresholds), function(j) {
+
+    counts <- phred_counts_filter[, j]
+
+    if (sum(counts) == 0) {
+      return(NA_real_)
+    }
+
+    sum(phred_levels * counts) / sum(counts)
+
+  }),
+
+  median_phred = sapply(seq_along(thresholds), function(j) {
+
+    get_phred_median(phred_counts_filter[, j])
+
+  })
+
+)
+
+# Menampilkan hasil filtering
+cat("\n========================================\n")
+cat("       SUMMARY MULTI-THRESHOLD          \n")
+cat("========================================\n")
+
+print(hasil_filtering)
+
+# Menyimpan summary
+write.csv(
+  hasil_filtering,
+  "results/filtering_summary.csv",
+  row.names = FALSE
+)
+
+
+# F. MENYIMPAN DISTRIBUSI PHRED HASIL FILTERING
+# ------------------------------------------------------------
+
+distribusi_phred_filtering <- data.frame(
+  phred_score = phred_levels
+)
+
+for (j in seq_along(thresholds)) {
+
+  jumlah_basa <- sum(phred_counts_filter[, j])
+
+  if (jumlah_basa > 0) {
+
+    distribusi_phred_filtering[[paste0("Q", thresholds[j])]] <-
+      phred_counts_filter[, j] / jumlah_basa * 100
+
+  } else {
+
+    distribusi_phred_filtering[[paste0("Q", thresholds[j])]] <- 0
+
+  }
+
+}
+
+write.csv(
+  distribusi_phred_filtering,
+  "results/phred_distribution_filtering.csv",
+  row.names = FALSE
+)
+
+
+# G. MEMILIH AMBANG FILTERING TERBAIK
+# ------------------------------------------------------------
+
+cat("\n========================================\n")
+cat("       PEMILIHAN THRESHOLD TERBAIK      \n")
+cat("========================================\n")
+
+cat("Silakan periksa tabel hasil filtering.\n")
+cat("Pilih salah satu threshold: 15, 20, atau 25.\n")
+
+best_threshold <- 20
+
+if (length(best_threshold) != 1 ||
+    is.na(best_threshold) ||
+    !best_threshold %in% thresholds) {
+
+  stop("Pilihan tidak valid. Jalankan kembali dan masukkan 15, 20, atau 25.")
+
+}
+
+cat("\nThreshold terpilih: Q", best_threshold, "\n", sep = "")
+
+
+# H. FUNGSI SLIDING WINDOW TRIMMING
+# ------------------------------------------------------------
+
+trim_one <- function(seq, qual, W = 4, Qmin = 20) {
+
+  q <- as.integer(qual)
+
+  if (length(q) < W) {
+    return(list(seq = "", qual = integer(0), end = 0L))
+  }
+
+  bad_start <- NA_integer_
+
+  # Memeriksa kualitas pada setiap sliding window
+  for (i in seq_len(length(q) - W + 1L)) {
+
+    if (mean(q[i:(i + W - 1L)]) < Qmin) {
+
+      bad_start <- i
+      break
+
+    }
+
+  }
+
+  # Menentukan posisi akhir trimming
+  end_pos <- if (is.na(bad_start)) {
+    length(q)
+  } else {
+    bad_start - 1L
+  }
+
+  if (end_pos < 1L) {
+
+    return(list(seq = "", qual = integer(0), end = 0L))
+
+  }
+
+  return(list(
+    seq = substr(seq, 1, end_pos),
+    qual = q[seq_len(end_pos)],
+    end = as.integer(end_pos)
+  ))
+
+}
+
+
+# I. PRE-PROCESSING PADA HASIL FILTER TERPILIH
+# ------------------------------------------------------------
+
+# Parameter trimming sesuai instruksi tugas
+W <- 4
+Qmin <- 20
+min_len <- 20
+
+# Lokasi file FASTQ hasil trimming
+clean_fastq_path <- "results/clean_sample.fastq.gz"
+
+# Menghapus hasil sebelumnya
+if (file.exists(clean_fastq_path)) {
+  file.remove(clean_fastq_path)
+}
+
+# Variabel penyimpanan hasil trimming
+total_reads_trim <- 0L
+total_pass_filter <- 0L
+total_pass_trim <- 0L
+
+# Distribusi Phred setelah trimming
+phred_counts_final <- numeric(length(phred_levels))
+
+# Membaca ulang FASTQ mentah
+stream_trim <- FastqStreamer(
+  fastq_path,
+  n = chunk_size
+)
+
+open(stream_trim)
+
+tryCatch({
+
+  repeat { 
+
+    fq_chunk <- yield(stream_trim)
+
+    if (length(fq_chunk) == 0L) {
+      break
+    }
+
+    total_reads_trim <- total_reads_trim + length(fq_chunk)
+
+    # Mengambil skor kualitas
+    qual_matrix <- as(quality(fq_chunk), "matrix")
+
+    # Menghitung rata-rata kualitas
+    mean_q <- rowMeans(qual_matrix, na.rm = TRUE)
+  
+    # Filtering menggunakan threshold terpilih
+    pass_filter <- !is.na(mean_q) &
+      mean_q >= best_threshold
+
+    fq_filtered <- fq_chunk[pass_filter]
+
+    total_pass_filter <- total_pass_filter + sum(pass_filter)
+
+    if (length(fq_filtered) > 0) {
+
+      # Mengambil sequence dan quality
+      seq_trim_input <- as.character(sread(fq_filtered))
+
+      qual_trim_input <- qual_matrix[
+        pass_filter,
+        ,
+        drop = FALSE
+      ]
+
+      # Melakukan trimming setiap read
+      trimmed <- lapply(
+        seq_along(seq_trim_input),
+        function(i) {
+
+          trim_one(
+            seq_trim_input[i],
+            qual_trim_input[i, ],
+            W = W,
+            Qmin = Qmin
+          )
+
+        }
+      )
+
+      # Mengambil hasil sequence dan panjang read
+      trim_seq <- vapply(
+        trimmed,
+        function(z) z$seq,
+        character(1)
+      ) 
+
+      end_pos <- vapply(
+        trimmed,
+        function(z) z$end,
+        integer(1)
+      )
+ 
+      # Filter panjang minimum 20 bp
+      keep_trim <- end_pos >= min_len
+
+      if (any(keep_trim)) {
+
+        # Mengubah skor Phred kembali ke karakter FASTQ
+        trim_qual <- vapply(
+          trimmed[keep_trim],
+          function(z) {
+            intToUtf8(as.integer(z$qual) + 33L)
+          },
+          character(1)
+        )
+
+        # Membuat objek FASTQ hasil trimming
+        fq_trimmed <- ShortReadQ(
+          sread = DNAStringSet(trim_seq[keep_trim]),
+          quality = BStringSet(trim_qual),
+          id = id(fq_filtered)[keep_trim]
+        )
+
+        # Menyimpan hasil setiap chunk
+        writeFastq(
+          fq_trimmed,
+          clean_fastq_path,
+          mode = if (file.exists(clean_fastq_path)) "a" else "w",
+          compress = TRUE
+        )
+
+        total_pass_trim <- total_pass_trim + sum(keep_trim)
+
+        # Mengumpulkan distribusi Phred akhir
+        final_q_values <- as.integer(
+          unlist(
+            lapply(
+              trimmed[keep_trim],
+              function(z) z$qual
+            ),
+            use.names = FALSE
+          )
+        )
+
+        phred_counts_final <-
+          phred_counts_final +
+          tabulate(final_q_values + 1L, nbins = 94L)
+
+      }
+
+    }
+
+    cat(
+      "Total read:", total_reads_trim,
+      "| Lolos filter:", total_pass_filter,
+      "| Lolos trimming:", total_pass_trim,
+      "\n"
+    )
+
+  }
+
+}, finally = {
+  close(stream_trim)
+})
+
+
+# J. SUMMARY AKHIR PRE-PROCESSING
+# ------------------------------------------------------------
+ 
+selected_reads <- hasil_filtering$read_lolos_filter[
+  hasil_filtering$threshold == best_threshold
+]
+
+hasil_trimming <- data.frame(
+
+  threshold_terpilih = best_threshold,
+
+  total_read_awal = total_reads_trim,
+
+  read_lolos_filter = total_pass_filter,
+
+  read_lolos_trimming = total_pass_trim,
+
+  survival_rate_filter = round(
+    total_pass_filter / total_reads_trim * 100,
+    2
+  ),
+
+  survival_rate_akhir = round(
+    total_pass_trim / total_reads_trim * 100,
+    2
+  ),
+
+  mean_phred_akhir = if (sum(phred_counts_final) > 0) {
+    sum(phred_levels * phred_counts_final) /
+      sum(phred_counts_final)
+  } else {
+    NA_real_
+  }
+
+)
+
+cat("\n========================================\n")
+cat("       SUMMARY AKHIR PRE-PROCESSING     \n")
+cat("========================================\n")
+
+print(hasil_trimming)
+
+
+# K. DISTRIBUSI PHRED AKHIR SETELAH TRIMMING
+# ------------------------------------------------------------
+
+distribusi_phred_akhir <- data.frame(
+
+  phred_score = phred_levels,
+
+  jumlah_basa = phred_counts_final,
+
+  persentase = if (sum(phred_counts_final) > 0) {
+    phred_counts_final / sum(phred_counts_final) * 100
+  } else {
+    rep(0, length(phred_levels))
+  }
+
+)
+
+write.csv(
+  distribusi_phred_akhir,
+  "results/phred_distribution_final.csv",
+  row.names = FALSE
+)
+
+
+# L. MENYIMPAN SELURUH RINGKASAN
+# ------------------------------------------------------------
+
+write.csv(
+  hasil_trimming,
+  "results/trimming_summary.csv",
+  row.names = FALSE
+)
+
+saveRDS(
+  list(
+    hasil_filtering = hasil_filtering,
+    hasil_trimming = hasil_trimming,
+    distribusi_phred_filtering = distribusi_phred_filtering,
+    distribusi_phred_akhir = distribusi_phred_akhir,
+    threshold_terpilih = best_threshold
+  ),
+  "results/summary_listing3.rds"
+)
+
+
+# M. INFORMASI FILE HASIL
+# ------------------------------------------------------------
+
+cat("\n========================================\n")
+cat("       PRE-PROCESSING SELESAI           \n")
+cat("========================================\n")
+
+if (file.exists(clean_fastq_path)) {
+
+  cat("File clean FASTQ :", clean_fastq_path, "\n")
+
+  cat(
+    "Ukuran file      :",
+    round(file.info(clean_fastq_path)$size / 1024^2, 2),
+    "MB\n"
+  )
+
+} else {
+
+  cat("Tidak ada read yang lolos seluruh tahapan.\n")
+
+}
+
+cat("\nSeluruh summary tersimpan di folder results.\n")
+
+```
+
+## Tahap2: Indexing&ReadAlignment(CleanFASTQ→SAM)
+
+```{r}
+# mengunduh genom yang paling dominan 
+# sumber : https://trace.ncbi.nlm.nih.gov/Traces/?view=run_browser&acc=SRR8500451&display=analysis
+library(rentrez)
+
+
+ref_acc  <- "NC_017022.1"   # Enterococcus faecium Aus0004, chromosome
+ref_url  <- paste0(
+  "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?",
+  "db=nuccore&id=", ref_acc, "&rettype=fasta&retmode=text"
+)
+ref_path <- "ref_genome/Enterococcus_NC_017022.1.fasta"
+
+options(timeout = 600)
+download.file(ref_url, destfile = ref_path, mode = "wb")
+
+ref_dna <- readDNAStringSet(ref_path)
+print(ref_dna)
+```
+
+```{r}
+clean_fastq_path <- "results/clean_sample.fastq.gz"
+
+ref_fasta <- list.files("ref_genome", pattern = "\\.(fasta|fa)$", full.names = TRUE)[1]
+
+buildindex(basename = "ref_genome/ref_index", reference = ref_fasta, gappedIndex = FALSE)
+
+align(
+  index = "ref_genome/ref_index",
+  readfile1 = clean_fastq_path,          # results/clean_sample.fastq.gz
+  output_file = "results/aligned_reads.sam",
+  output_format = "SAM",                 # default Rsubread adalah BAM
+  input_format = "gzFASTQ",
+  type = "dna",
+  nthreads = 2,
+  unique = TRUE
+)
+```
+
+```{r}
+
+sam_output_path <- "results/aligned_reads.sam"
+
+# Mapping rate
+mp <- propmapped(sam_output_path)
+print(mp)  
+```
+
+## Tahap3:PemrosesanAlignment(SAM→BAM→SortedBAM+BAI)
+
+```{r}
+sam_file          <- "results/aligned_reads.sam"
+bam_file          <- "results/aligned_reads.bam"
+sorted_bam_prefix <- "results/aligned_reads_sorted"
+sorted_bam_file   <- "results/aligned_reads_sorted.bam"
+
+# 1. SAM -> BAM
+asBam(file = sam_file, destination = "results/aligned_reads",
+      overwrite = TRUE, indexDestination = FALSE)
+
+# 2. Sorting berdasarkan koordinat genom
+sortBam(file = bam_file, destination = sorted_bam_prefix)
+
+# 3. Indeks .bai
+indexBam(file = sorted_bam_file)
+
+# 4. Statistik pemetaan
+idx_stats <- idxstatsBam(sorted_bam_file)
+print(idx_stats)
+
+```
+
+```{r}
+library(GenomicAlignments)
+
+clean_fastq_path <- "results/clean_sample.fastq.gz"
+
+# 5. Coverage: depth dan breadth
+cov <- coverage(sorted_bam_file)
+cov_chr <- cov[[1]]                     
+mean_depth <- mean(as.numeric(cov_chr))  # rata-rata depth (x)
+breadth    <- mean(cov_chr > 0) * 100    # % basa genom yang tertutup read
+
+cat("Mean depth :", round(mean_depth, 3), "x\n")
+cat("Breadth    :", round(breadth, 2), "%\n")
+cat("Max depth  :", max(cov_chr), "x\n")
+
+```
+
+## Tahap4:VariantCalling&GenerasiFileVCF(SortedBAM→VCF)
+
+```{r}
+sorted_bam_file <- "results/aligned_reads_sorted.bam"
+ref_fasta       <- "ref_genome/Enterococcus_NC_017022.1.fasta" 
+vcf_out_path    <- "results/detected_variants.vcf"
+
+stopifnot(file.exists(sorted_bam_file),
+          file.exists(paste0(sorted_bam_file, ".bai")),
+          file.exists(ref_fasta))
+
+# Variant calling (SNV)
+exactSNP(
+  readFile           = sorted_bam_file,
+  isBAM              = TRUE,
+  refGenomeFile      = ref_fasta,
+  outputFile         = vcf_out_path,
+  minReads           = 3,      # minimal read pendukung alel alternatif
+  minAllelicFraction = 0.2,    # minimal frekuensi alel alternatif
+  minBaseQuality     = 20,     # threshold Q20 
+  nthreads           = 2
+)
+
+# Lanjut hanya jika VCF benar-benar terbentuk
+if (!file.exists(vcf_out_path)) stop("VCF tidak terbentuk, cek pesan error exactSNP di atas.")
+
+cat("VCF dibuat:", vcf_out_path, "\n")
+cat("Ukuran VCF (MB):", round(file.size(vcf_out_path) / 1024^2, 4), "\n")
+
+# Validasi dan ringkasan dengan VariantAnnotation
+vcf <- tryCatch(readVcf(vcf_out_path), error = function(e) NULL)
+
+if (!is.null(vcf)) {
+  print(vcf)
+  cat("Total varian:", nrow(vcf), "\n")
+  print(table(isSNV(vcf)))
+} else {
+  raw <- read.table(vcf_out_path, comment.char = "#", sep = "\t",
+                    stringsAsFactors = FALSE, quote = "")
+  cat("Total varian (dibaca manual):", nrow(raw), "\n")
+  print(head(raw))
+}
+```
+
+```{r}
+clean_fastq_path <- "results/clean_sample.fastq.gz"
+sam_file        <- "results/aligned_reads.sam"
+bam_file        <- "results/aligned_reads.bam"
+sorted_bam_file <- "results/aligned_reads_sorted.bam"
+vcf_out_path    <- "results/detected_variants.vcf"
+
+# 6. Ukuran file untuk tabel log
+files <- c(
+  clean_fastq = clean_fastq_path,
+  sam         = sam_file,
+  bam         = bam_file,
+  sorted_bam  = sorted_bam_file,
+  bai         = paste0(sorted_bam_file, ".bai"),
+  vcf         = vcf_out_path
+)
+sizes <- data.frame(
+  file    = names(files),
+  size_MB = round(file.size(files) / 1024^2, 3)
+)
+print(sizes)
+```
+
+## audit
+
+```{r}
+# AUDIT PIPELINE
+suppressPackageStartupMessages({
+  library(Rsubread); library(Rsamtools); library(GenomicAlignments)
+  library(Biostrings); library(ShortRead); library(ggplot2)
+})
+
+raw_fastq   <- "raw_data/SRR8500451_1.fastq.gz"
+clean_fastq <- "results/clean_sample.fastq.gz"
+sam_file    <- "results/aligned_reads.sam"
+bam_file    <- "results/aligned_reads.bam"
+sorted_bam  <- "results/aligned_reads_sorted.bam"
+bai_file    <- paste0(sorted_bam, ".bai")
+vcf_file    <- "results/detected_variants.vcf"
+ref_fasta   <- "ref_genome/Enterococcus_NC_017022.1.fasta"
+
+mb <- function(f) round(file.size(f) / 1024^2, 3)
+dir.create("reports", showWarnings = FALSE)
+
+# ---------- 0. Cek semua file ada ----------
+semua <- c(raw_fastq, clean_fastq, sam_file, bam_file, sorted_bam, bai_file, vcf_file, ref_fasta)
+print(data.frame(file = semua, ada = file.exists(semua), ukuran_MB = mb(semua)))
+
+# ---------- 1. Pre-processing (dari CSV yang sudah tersimpan) ----------
+filt        <- read.csv("results/filtering_summary.csv")
+trim        <- read.csv("results/trimming_summary.csv")
+phred_filt  <- read.csv("results/phred_distribution_filtering.csv")
+phred_final <- read.csv("results/phred_distribution_final.csv")
+
+cat("\n=== Multi-threshold filtering (Q15/Q20/Q25) ===\n"); print(filt)
+cat("\n=== Hasil trimming (threshold terpilih) ===\n");     print(trim)
+
+total_reads  <- trim$total_read_awal
+reads_lolos  <- trim$read_lolos_trimming
+surv_akhir   <- trim$survival_rate_akhir
+
+# Panjang read sebelum vs sesudah trimming (sampel 20.000 read, cepat)
+set.seed(1)
+len_raw   <- width(yield(FastqSampler(raw_fastq,   n = 20000)))
+len_clean <- width(yield(FastqSampler(clean_fastq, n = 20000)))
+cat("\nPanjang read rata-rata: mentah =", round(mean(len_raw), 1),
+    "bp | setelah trimming =", round(mean(len_clean), 1), "bp\n")
+
+# ---------- 2. Alignment / mapping rate ----------
+idx <- idxstatsBam(sorted_bam)
+cat("\n=== idxstats ===\n"); print(idx)
+mapped_reads   <- sum(idx$mapped)
+unmapped_reads <- sum(idx$unmapped)
+mapping_rate   <- mapped_reads / (mapped_reads + unmapped_reads) * 100
+cat("Mapped:", mapped_reads, "| Unmapped:", unmapped_reads,
+    "| Mapping rate:", round(mapping_rate, 2), "%\n")
+
+cat("\n=== propmapped (Rsubread, dari SAM) ===\n")
+print(tryCatch(propmapped(sam_file), error = function(e) conditionMessage(e)))
+
+# ---------- 3. Coverage ----------
+cov_chr    <- coverage(sorted_bam)[[1]]
+depth_vec  <- as.numeric(cov_chr)
+mean_depth <- mean(depth_vec)
+breadth    <- mean(depth_vec > 0) * 100
+depth_cov  <- mean(depth_vec[depth_vec > 0])   # rata-rata hanya di basa yang tertutup
+ref_len    <- sum(width(readDNAStringSet(ref_fasta)))
+
+cat("\n=== Coverage ===\n")
+cat("Panjang referensi :", ref_len, "bp\n")
+cat("Mean depth        :", round(mean_depth, 3), "x\n")
+cat("Depth (basa tertutup saja):", round(depth_cov, 3), "x\n")
+cat("Breadth coverage  :", round(breadth, 2), "%\n")
+cat("Median / Max depth:", median(depth_vec), "/", max(depth_vec), "x\n")
+cat("Basa dengan depth >= 5x:", round(mean(depth_vec >= 5) * 100, 2), "%\n")
+
+# ---------- 4. Variant calling (VCF) ----------
+vcf_raw <- tryCatch(
+  read.table(vcf_file, comment.char = "#", sep = "\t", quote = "",
+             stringsAsFactors = FALSE, fill = TRUE),
+  error = function(e) data.frame())
+
+if (nrow(vcf_raw) > 0) {
+  names(vcf_raw)[1:5] <- c("CHROM", "POS", "ID", "REF", "ALT")
+  is_snv   <- nchar(vcf_raw$REF) == 1 & nchar(vcf_raw$ALT) == 1
+  n_snv    <- sum(is_snv)
+  n_indel  <- sum(!is_snv)
+  pair     <- paste0(vcf_raw$REF[is_snv], vcf_raw$ALT[is_snv])
+  ts       <- sum(pair %in% c("AG", "GA", "CT", "TC"))
+  tv       <- n_snv - ts
+  cat("\n=== VCF ===\n")
+  cat("Total varian:", nrow(vcf_raw), "| SNV:", n_snv, "| InDel:", n_indel, "\n")
+  cat("Kepadatan   :", round(n_snv / (ref_len / 1e6), 1), "SNV per Mb\n")
+  cat("Ts/Tv ratio :", round(ts / max(tv, 1), 2), " (Ts =", ts, ", Tv =", tv, ")\n")
+  cat("Contoh kolom INFO:\n"); print(head(vcf_raw[, ncol(vcf_raw)], 3))
+} else {
+  n_snv <- 0; n_indel <- 0
+  cat("\nVCF kosong / tidak terbaca.\n")
+}
+
+# ---------- 5. TABEL LOG EVALUASI (siap salin ke laporan) ----------
+tabel_log <- data.frame(
+  Tahap = c("0. Data Mentah", "1. Pre-processing", "2. Read Alignment",
+            "3. Compression & Sorting", "4. Indexing", "5. Variant Calling"),
+  Input  = c("-", "FASTQ", "Clean FASTQ", "SAM", "Sorted BAM", "Sorted BAM"),
+  Output = c("FASTQ", "Clean FASTQ", "SAM", "Sorted BAM", "BAI", "VCF"),
+  Ukuran_MB = c(mb(raw_fastq), mb(clean_fastq), mb(sam_file), mb(sorted_bam), mb(bai_file), mb(vcf_file)),
+  Metrik = c(
+    paste0("Total Read: ", format(total_reads, big.mark = ".")),
+    paste0("Read Lolos: ", format(reads_lolos, big.mark = "."), " (", surv_akhir, "%)"),
+    paste0("Mapped Reads: ", format(mapped_reads, big.mark = "."), " (", round(mapping_rate, 2), "%)"),
+    paste0("Coverage Depth: ", round(mean_depth, 3), "x (breadth ", round(breadth, 2), "%)"),
+    "Indeks Genomic Coordinate",
+    paste0("Total SNV/Indel: ", n_snv + n_indel, " (SNV ", n_snv, ", InDel ", n_indel, ")")
+  )
+)
+cat("\n=== TABEL LOG EVALUASI ===\n"); print(tabel_log, right = FALSE)
+write.csv(tabel_log, "results/tabel_log_evaluasi.csv", row.names = FALSE)
+
+# ---------- 6. Grafik untuk presentasi (tersimpan di reports/) ----------
+p1 <- ggplot(filt, aes(factor(paste0("Q", threshold)), survival_rate)) +
+  geom_col(fill = "steelblue") + geom_text(aes(label = paste0(survival_rate, "%")), vjust = -0.3) +
+  labs(x = "Ambang kualitas", y = "Read survival (%)", title = "Survival rate per ambang kualitas") +
+  theme_minimal()
+ggsave("reports/grafik_survival_rate.png", p1, width = 6, height = 4, dpi = 200)
+
+phred_long <- rbind(
+  data.frame(phred = phred_filt$phred_score, persen = phred_filt$Q15, set = "Filter Q15"),
+  data.frame(phred = phred_filt$phred_score, persen = phred_filt$Q20, set = "Filter Q20"),
+  data.frame(phred = phred_filt$phred_score, persen = phred_filt$Q25, set = "Filter Q25"),
+  data.frame(phred = phred_final$phred_score, persen = phred_final$persentase, set = "Akhir (filter+trimming)"))
+p2 <- ggplot(phred_long[phred_long$phred <= 45, ], aes(phred, persen, colour = set)) +
+  geom_line() + labs(x = "Skor Phred", y = "% basa", title = "Distribusi Phred") + theme_minimal()
+ggsave("reports/grafik_distribusi_phred.png", p2, width = 7, height = 4, dpi = 200)
+
+p3 <- ggplot(data.frame(depth = pmin(depth_vec, quantile(depth_vec, 0.99))), aes(depth)) +
+  geom_histogram(bins = 50, fill = "darkgreen") +
+  labs(x = "Depth (x), dipotong di persentil 99", y = "Jumlah basa", title = "Distribusi coverage depth") +
+  theme_minimal()
+ggsave("reports/grafik_coverage_depth.png", p3, width = 6, height = 4, dpi = 200)
+
+if (nrow(vcf_raw) > 0) {
+  p4 <- ggplot(vcf_raw, aes(POS)) + geom_histogram(bins = 60, fill = "firebrick") +
+    labs(x = "Posisi di kromosom (bp)", y = "Jumlah varian", title = "Sebaran varian di genom") +
+    theme_minimal()
+  ggsave("reports/grafik_sebaran_varian.png", p4, width = 7, height = 4, dpi = 200)
+}
+cat("\nGrafik tersimpan di folder reports/\n")
+```
+
+## uji variat calling (q15,q20,q25)
+
+```{r}
+thr <- c(15, 20, 25)
+hasil_q <- data.frame(Q = thr, SNV = NA_integer_)
+for (i in seq_along(thr)) {
+  out <- paste0("results/detected_variants_Q", thr[i], ".vcf")
+  exactSNP(readFile = sorted_bam, isBAM = TRUE, refGenomeFile = ref_fasta,
+           outputFile = out, minReads = 3, minAllelicFraction = 0.2,
+           minBaseQuality = thr[i], nthreads = 2)
+  hasil_q$SNV[i] <- nrow(read.table(out, comment.char = "#", sep = "\t", quote = "", fill = TRUE))
+}
+print(hasil_q)
+```
