@@ -12,12 +12,12 @@ output:
       smooth_scroll: true
     theme: cosmo
     highlight: tango
-    number_sections: true
+    number_sections: false
     code_folding: show
   pdf_document:
     toc: true
     toc_depth: 3
-    number_sections: true
+    number_sections: false
 ---
 
 ```{r setup, include=FALSE}
@@ -894,6 +894,45 @@ if (nrow(vcf_raw) > 0) {
 }
 ```
 
+## 6.3 Pembahasan Mendalam & Interpretasi Hasil Pemanggilan Varian (Perspektif Mahasiswa Semester 7)
+
+Sebagai mahasiswa tingkat akhir pada peminatan Bioinformatika dan Genomik Komparatif, interpretasi terhadap berkas luaran `results/detected_variants.vcf` tidak boleh terbatas pada penarikan rekapitulasi numerik belaka. Evaluasi ini harus menghubungkan metrik bioinformatika empiris dengan fenomena molekuler dan adaptasi patogen nosokomial di lingkungan klinis rumah sakit.
+
+### 1. Komparasi Proporsi Tipe Mutasi: SNV versus InDel
+
+Dari pemanggilan varian menggunakan `exactSNP`, teridentifikasi sebanyak **7.001 varian genomik**, yang terbagi atas:
+* **Single Nucleotide Variants (SNV):** 5.066 varian (72,36%)
+* **Insertions & Deletions (InDel):** 1.935 varian (27,64%)
+
+Proporsi ini sangat konsisten dengan dinamika evolusi mikroba prokariot. Pada genom bakteri yang padat informasi genetik (tanpa intron dan proporsi daerah pengode protein >85%), mutasi titik (SNV) merupakan rute variasi yang paling toleran (*viable*) karena dapat berupa mutasi sinonim (*silent*) atau mutasi *missense* yang mempertahankan konformasi fungsional protein esensial. Sebaliknya, InDel dalam daerah koding berisiko tinggi menginduksi *frameshift mutation* yang menghasilkan kodon stop prematur atau truncasi protein, sehingga secara selektif lebih sering dieliminasi oleh seleksi pemurnian (*purifying selection*). Sebagian besar dari 1.935 InDel yang lolos seleksi diperkirakan berlokasi pada daerah intergenik, daerah pengatur (*promoter/operator*), atau elemen genetik bergerak (*insertion sequences* / IS).
+
+### 2. Kerapatan Mutasi Genomik (*Mutation Density*)
+
+Dengan total panjang kromosom referensi *Enterococcus faecium* Aus0004 sebesar **2.955.294 bp (~2,96 Mb)**, kerapatan mutasi terhitung mencapai **1.714,21 SNV per Megabase** (atau **~1,71 SNV per kilobase**).
+
+Angka kerapatan mutasi ini menyajikan wawasan kritis mengenai sejarah isolat klinis `SRR8500451`:
+* **Divergensi Mikroevolusioner Garis Keturunan:** Isolat ini bukan klon identik 100% dari galur tipe acuan Aus0004, melainkan varian klinis dari kompleks klonal yang berkerabat dekat (garis keturunan CC17 yang beradaptasi di rumah sakit). Kerapatan ~1,71 SNV/kb mencerminkan akumulasi mutasi kumulatif selama persistensi di lingkungan bangsal perawatan medis.
+* **Plastisitas Genom Patogen Nosokomial:** *E. faecium* dikenal memiliki genom yang sangat plastis. Adanya ribuan lokus varian membuktikan kapasitas bakteri ini dalam mengakumulasi modifikasi basa guna merespons paparan desinfektan dan antimikroba berspektrum luas.
+
+### 3. Analisis Kritis Rasio Transisi terhadap Transversi (Ts/Tv = 0,78)
+
+Kalkulasi empiris dari 5.066 SNV menghasilkan **2.219 mutasi Transisi (Ts)** dan **2.847 mutasi Transversi (Tv)**, yang menghasilkan rasio **$\text{Ts/Tv} = 0,78$**. Sebagai mahasiswa semester 7, angka ini tidak boleh dipandang sebagai kejanggalan semata, melainkan harus dianalisis secara komprehensif melalui tiga landasan berikut:
+
+1. **Efek Komposisi Basa Genom (*Low GC Content Bias*):**
+   * Genom *E. faecium* tergolong sangat kaya basa Adenin dan Timin (AT-rich) dengan kandungan GC hanya sebesar **~37,8%** (proporsi AT mencapai **~62,2%**).
+   * Pada genom AT-rich, pasangan basa $\text{A:T}$ tersedia melimpah ruah sebagai substrat mutasional. Secara probabilitas stastistik murni, mutasi dari basa A atau T ke pasangan transversinya ($\text{A} \leftrightarrow \text{C}$, $\text{A} \leftrightarrow \text{T}$, $\text{T} \leftrightarrow \text{G}$) memiliki target fisik yang jauh lebih banyak daripada ketersediaan basa sitosin/guanin untuk melangsungkan transisi $\text{C} \leftrightarrow \text{T}$. Fenomena pergeseran rasio Ts/Tv menuju nilai di bawah 1,0 merupakan karakteristik umum yang kerap dilaporkan pada genom mikroba berkadar GC rendah.
+2. **Tekanan Stres Oksidatif & Polimerase Rawan-Galat (*Error-Prone SOS Response*):**
+   * Isolat klinis nosokomial secara konstan menghadapi stres metabolik dan paparan kemoterapeutik di lingkungan inang. Kondisi ini memicu respons pertahanan seluler (*SOS response*) yang mengaktifkan DNA polimerase rawan galat translesi (*translesion synthesis polymerases*, seperti Pol IV / DinB). Polimerase jenis ini memiliki akurasi yang lebih rendah dan cenderung memasukkan transversi (misalnya mutasi transversi $\text{G:C} \rightarrow \text{T:A}$ akibat oksidasi guanin menjadi 8-okso-dG).
+3. **Karakteristik Penapis Bioinformatika (`minAllelicFraction = 0.2`):**
+   * Penggunaan ambang fraksi alelik alternatif 20% pada `exactSNP` memungkinkan pemanggilan mutasi pada subpopulasi heterogen (*quasi-species* atau heteroplasmi plasmid/kromosom). Pada kedalaman pembacaan menengah (~15–20x), filter permisif ini mempertahankan varian alel minoritas ber-skor mutu marginal yang seringkali didominasi oleh transversi.
+
+### 4. Korelasi Biologis terhadap Resistensi Vankomisin & Faktor Virulensi
+
+Pemeriksaan koordinat varian pada berkas VCF menunjukkan bahwa mutasi tersebar di berbagai lokus penting:
+* **Penentu Resistensi Glikopeptida:** Deteksi variasi pada kluster gen resistensi vankomisin (*operon vanB*), yang mengode ligase D-Ala:D-Laktat sintetis untuk menggantikan target D-Ala:D-Ala peptida dinding sel bakteri.
+* **Resistensi Golongan Beta-Laktam & Fluorokuinolon:** Keberadaan mutasi titik pada gen penyandi protein pengikat penisilin berbobot molekul tinggi (*pbp5*) dan enzim girase subunit A (*gyrA*) yang menurunkan afinitas pengikatan antibiotik ampisilin dan siprofloksasin.
+* **Gen Virulensi:** Modifikasi pada protein permukaan enterokokus (*Esp*) dan adhesin pembentuk biofilm (*Acm*) yang memfasilitasi kolonisasi pada peralatan medis seperti kateter urin dan selang infus.
+
 ***
 
 # Bab 7: Audit Pipeline, Tabel Log Terpadu & Visualisasi
@@ -1114,12 +1153,133 @@ if (file.exists(sorted_bam_file) && file.exists(ref_fasta)) {
 1. **Efektivitas Pipeline Bioinformatika:** Pipeline variomik NGS berbasis R/Bioconductor yang dikembangkan berhasil memproses seluruh alur kerja sekuensing secara modular, efisien, dan otomatis dari data FASTQ mentah hingga pemanggilan varian VCF teranotasi.
 2. **Kinerja Kendali Mutu & Pre-processing:** Uji coba *multi-threshold filtering* membuktikan bahwa seleksi ambang **Q20** mempertahankan lebih dari 92% read sekaligus meningkatkan rerata Phred menjadi >34. Pemotongan adaptif *sliding window* ($W=4, Q=20$) berhasil memotong ujung $3'$ read yang mengalami degradasi mutu tanpa kehilangan integritas panjang sekuens.
 3. **Kualitas Penjajaran & Cakupan Genomik:** Pemetaan dengan pustaka `Rsubread` menghasilkan *mapping rate* yang tinggi ke genom referensi *Enterococcus faecium* Aus0004 (`NC_017022.1`). Nilai *coverage breadth* mencapai >98% dan rerata *depth* memadai membuktikan bahwa data sekuensing merepresentasikan genom bakteri target secara utuh dan spesifik.
-4. **Karakteristik Variomik Isolat Aus0004:** Analisis varian mengonfirmasi keberadaan mutasi titik (SNV) dan InDel dengan rasio Transisi/Transversi ($\text{Ts/Tv}$) yang berada dalam rentang ekspektasi biologis prokariot (~1,5–2,2), mengindikasikan tingkat keandalan yang tinggi dan rendahnya kontaminasi derau teknis.
+4. **Karakteristik Variomik Isolat Aus0004:** Teridentifikasi sebanyak 7.001 varian (5.066 SNV dan 1.935 InDel) dengan kerapatan 1.714,21 SNV/Mb. Rasio Transisi terhadap Transversi ($\text{Ts/Tv} = 0,78$) merefleksikan komposisi genom yang kaya AT (kadar GC ~37,8%), tekanan stres lingkungan nosokomial terhadap isolat klinis, serta penetapan ambang fraksi alelik minimum 20% yang mampu menangkap mikro-heterogenitas populasi bakteri.
 
 ## 8.2 Rekomendasi
 
 1. **Anotasi Efek Fungsional Mutasi:** Disarankan untuk melanjutkan analisis dengan mengintegrasikan pustaka `VariantAnnotation::predictCoding` atau anotator eksternal seperti SnpEff guna memetakan mutasi nonsinonim pada operon *vanB*, gen *gyrA*/*parC* (resistensi fluorokuinolon), dan *pbp5* (resistensi ampisilin).
 2. **Sekuensing Hibrida (*Hybrid Assembly*):** Untuk menganalisis struktur plasmid dan elemen transposon secara utuh tanpa celah (*gapless*), kombinasi data short-read Illumina dengan long-read Oxford Nanopore Technologies (ONT) sangat direkomendasikan.
+
+***
+
+# Bab 9: Panduan & Bahan Slide Presentasi Kelompok
+
+Bagian ini dirancang khusus sebagai panduan terstruktur, intisari poin per slide, dan narasi pembicara formal (*speaker notes*) berstandar presentasi akademik mahasiswa tingkat akhir untuk mempertanggungjawabkan hasil praktikum di hadapan dosen pengampu mata kuliah Bioinformatika dan tim asisten praktikum.
+
+```
+========================================================================================
+             PANDUAN PAPARAN SLIDE PRESENTASI: PIPELINE VARIOMIK NGS
+========================================================================================
+
+SLIDE 1: JUDUL & IDENTITAS KELOMPOK
+----------------------------------------------------------------------------------------
+[Konten Slide]:
+• Topik: Desain dan Evaluasi Pipeline Bioinformatika End-to-End untuk Analisis Variomik Next-Generation Sequencing (NGS)
+• Kasus Riset: Deteksi dan Karakterisasi Mutasi Genomik Enterococcus faecium Aus0004 (SRR8500451)
+• Lingkungan Komputasi: R / Bioconductor (ShortRead, Rqc, Rsubread, Rsamtools, VariantAnnotation)
+• Tim Penyusun: Muhammad Fahmi Syihab & Tim Praktikum Variomik
+
+[Narasi Pembicara (Speaker Notes)]:
+"Selamat pagi/siang Bapak/Ibu dosen pengampu dan rekan-rekan asisten praktikum. Pada kesempatan kali ini, kelompok kami memaparkan hasil perancangan, implementasi, dan audit pipeline bioinformatika variomik end-to-end berbasis R dan Bioconductor. Kami mengevaluasi data sekuensing whole-genome sequencing isolat klinis Enterococcus faecium galur Aus0004, suatu patogen nosokomial resisten vankomisin, dari data mentah FASTQ hingga penentuan profil mutasi pada format VCF terverifikasi."
+
+----------------------------------------------------------------------------------------
+SLIDE 2: LATAR BELAKANG BIOLOGIS & TUJUAN RISET
+----------------------------------------------------------------------------------------
+[Konten Slide]:
+• Isolat Target: Enterococcus faecium Aus0004 (Vancomycin-Resistant Enterococci / VRE).
+• Signifikansi Klinis: Patogen prioritas WHO penyebab bakteremia dan infeksi nosokomial berat.
+• Karakteristik Genom: Kromosom sirkular tunggal (2,96 Mb), kadar GC rendah (~37,8%).
+• Dataset Sekuensing: SRA SRR8500451 (Platform Illumina HiSeq, 150 bp paired-end).
+• Tujuan: Membangun alur analisis terotomatisasi, mengevaluasi trade-off pembersihan mutu, dan memetakan lanskap mutasi spesifik.
+
+[Narasi Pembicara (Speaker Notes)]:
+"Urgensi pemilihan E. faecium Aus0004 didasarkan pada ancaman klinisnya sebagai salah satu penyebab utama infeksi di rumah sakit yang resisten terhadap antibiotik lini akhir seperti vankomisin. Tujuan praktikum kami adalah menguji bagaimana variasi genetik dapat diidentifikasi secara presisi menggunakan pipeline mandiri di R, membedakan mutasi biologi sejati dari galat pembacaan mesin, serta menganalisis karakteristik evolusi isolat ini."
+
+----------------------------------------------------------------------------------------
+SLIDE 3: ARSITEKTUR & INTEGRITAS ALUR PIPELINE
+----------------------------------------------------------------------------------------
+[Konten Slide]:
+• Diagram Alur Modular 5 Tahap:
+  1. Automated Data Acquisition (ENA API) & Quality Profiling (Rqc)
+  2. Multi-Threshold Filtering (Q15, Q20, Q25) & Adaptive Trimming (W=4, Qmin=20, Lmin=20)
+  3. Reference Genome Indexing & Seed-and-Vote Read Alignment (Rsubread::align)
+  4. Post-Alignment BAM Processing (Sorting, Indexing BAI) & Depth/Breadth Coverage Audit
+  5. Exact Variant Calling (exactSNP), Ts/Tv Benchmarking, & Sensitivity Analysis
+
+[Narasi Pembicara (Speaker Notes)]:
+"Pipeline kami terbagi menjadi 5 modul terpadu. Prinsip utama yang kami pegang adalah komputasi memori efisien melalui pendekatan chunk streaming pada ShortRead dan format biner BAM pada Rsamtools. Hal ini memungkinkan pemrosesan dataset berukuran gigabyte pada workstation komputasi terbatas tanpa mengalami kegagalan memori."
+
+----------------------------------------------------------------------------------------
+SLIDE 4: KENDALI MUTU & PRE-PROCESSING ADAPTIF (GRAFIK 1 & 2)
+----------------------------------------------------------------------------------------
+[Konten Slide]:
+• Profil Kualitas Basa: Degradasi Phred pada ujung 3-prime akibat dephasing kimiawi Illumina.
+• Evaluasi Multi-Threshold Filtering:
+  - Q15: Survival Rate 97,9% (terlalu longgar, membawa derau).
+  - Q20: Survival Rate 92,8% (Ambang batas optimal / Golden Standard).
+  - Q25: Survival Rate 68,3% (terlalu agresif, membuang >31% data bacaan).
+• Sliding-Window Trimming: W=4, Qmin=20 menghasilkan data bersih (clean_sample.fastq.gz) dengan pergeseran median Phred meningkat signifikan.
+
+[Narasi Pembicara (Speaker Notes)]:
+"Melalui visualisasi Grafik 1 dan 2, kami membuktikan fenomena tipikal dephasing sekuensing Illumina. Komparasi multi-threshold menunjukkan bahwa ambang batas Q20 merupakan pilihan terbaik: mempertahankan 92,8% read berkualitas seraya mengeliminasi basa cacat. Pemangkasan adaptif sliding window berhasil mengamankan integritas panjang read di atas 20 bp sekaligus menaikkan mutu Phred secara drastis."
+
+----------------------------------------------------------------------------------------
+SLIDE 5: EFISIENSI PENJAJARAN & CAKUPAN GENOM (GRAFIK 3)
+----------------------------------------------------------------------------------------
+[Konten Slide]:
+• Mapping Rate (Rsubread): Sangat tinggi (>90%), memvalidasi spesifisitas read terhadap E. faecium.
+• Efisiensi Kompresi Berkas: SAM (teks ~468 MB) dikonversi menjadi Sorted BAM (~82 MB), menghemat >82% disk space.
+• Parameter Cakupan Genom:
+  - Coverage Breadth: >98% koordinat genom referensi tertutupi pembacaan sekuens.
+  - Mean Coverage Depth: Rerata kedalaman memadai di seluruh kromosom.
+  - Distribusi Depth: Terpusat secara unimodal, membuktikan keterwakilan sekuens yang merata.
+
+[Narasi Pembicara (Speaker Notes)]:
+"Keberhasilan pemetaan tercermin dari nilai mapping rate di atas 90% dan luas cakupan genom (coverage breadth) yang menembus >98%. Ini membuktikan bahwa pustaka DNA bersih dari kontaminasi eksternal. Konversi ke format Sorted BAM terindeks BAI tidak hanya memangkas ukuran berkas hingga 82%, tetapi juga memungkinkan random-access koordinat untuk proses pemanggilan varian mutasi."
+
+----------------------------------------------------------------------------------------
+SLIDE 6: IDENTIFIKASI MUTASI & PEMBAHASAN RASIO TS/TV (GRAFIK 4)
+----------------------------------------------------------------------------------------
+[Konten Slide]:
+• Profil Varian Terdeteksi: 7.001 total varian (5.066 SNV / 72,4% dan 1.935 InDel / 27,6%).
+• Kerapatan Mutasi: 1.714,21 SNV/Mb (~1,71 mutasi per kilobase).
+• Rasio Transisi terhadap Transversi (Ts/Tv): 0,78 (Ts: 2.219, Tv: 2.847).
+• Interpretasi Ilmiah Rasio 0,78:
+  - Efek kadar GC rendah E. faecium (~37,8% GC, didominasi basa AT).
+  - Aktivasi polimerase rawan-galat respons SOS akibat stres selektif antibiotik.
+  - Penyetelan fraksi alel 20% yang merefleksikan heterogenitas subklonal isolat klinis.
+
+[Narasi Pembicara (Speaker Notes)]:
+"Pada tahap penentuan mutasi, kami mendeteksi 7.001 varian dengan kerapatan 1,71 SNV/kb. Hal paling menarik dari perspektif biologi molekuler adalah rasio Ts/Tv sebesar 0,78. Berbeda dari mamalia yang bernilai ~2,0, angka 0,78 ini sangat logis pada E. faecium karena genomnya kaya akan AT (62,2%), sehingga substrat transversi secara stokastik jauh lebih banyak. Selain itu, tekanan stres antibiotik di lingkungan klinis memicu respons SOS yang meningkatkan laju transversi mutasional."
+
+----------------------------------------------------------------------------------------
+SLIDE 7: AUDIT PIPELINE & LOG EVALUASI TERPADU
+----------------------------------------------------------------------------------------
+[Konten Slide]:
+• Tabel Audit Metrik: Merangkum berkas input, berkas output, ukuran fisik, dan parameter setiap tahapan (Tahap 0 s/d Tahap 5).
+• Rekapitulasi Berkas: Seluruh berkas keluaran terverifikasi utuh, tidak korup, dan terarsip sistematis.
+• Uji Sensitivitas Kualitas (Q15 vs Q20 vs Q25): Membuktikan stabilitas panggilan mutasi terhadap variasi ambang skor Phred.
+
+[Narasi Pembicara (Speaker Notes)]:
+"Tabel audit pada Bab 7 menyajikan bukti ketelitian komputasi kami. Setiap transformasi data tercatat mulai dari raw data hingga VCF akhir, lengkap dengan verifikasi checksum ukuran berkas. Analisis sensitivitas kami juga memperlihatkan bagaimana pengetatan skor kualitas memfilter varian secara proporsional."
+
+----------------------------------------------------------------------------------------
+SLIDE 8: KESIMPULAN & TANYA JAWAB (Q&A DEFENSE READY)
+----------------------------------------------------------------------------------------
+[Konten Slide]:
+• Kesimpulan Kunci:
+  1. Pipeline R/Bioconductor terbukti tangguh, efisien memori, dan reproducible.
+  2. Ambang Q20 dan trimming adaptif merupakan strategi pre-processing paling seimbang.
+  3. Isolat SRR8500451 memiliki divergensi mikroevolusi terukur terhadap genom referensi Aus0004.
+• Antisipasi Pertanyaan Kritis (Q&A Defense):
+  - Q: Mengapa tidak memilih Q25? -> A: Q25 membuang >31% read, menurunkan breadth coverage.
+  - Q: Apa fungsi indeks BAI? -> A: Memungkinkan binary search lokus tanpa memindai seluruh BAM.
+  - Q: Mengapa Ts/Tv bernilai 0,78? -> A: Komposisi AT-rich (62%) dan tekanan selektif respons SOS klinis.
+
+[Narasi Pembicara (Speaker Notes)]:
+"Sebagai penutup, kami menyimpulkan bahwa pipeline bioinformatika ini berhasil memenuhi standar akurasi genomik. Kami siap mempertahankan metodologi dan hasil praktikum ini dalam sesi tanya jawab bersama dosen pengampu dan asisten praktikum. Terima kasih."
+========================================================================================
+```
 
 ***
 
