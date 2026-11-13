@@ -300,7 +300,7 @@ register(SerialParam())
 
 raw_fq_match <- list.files("raw_data", pattern = paste0("^", sra_id, "_1","\\.fastq\\.gz$"), full.names = TRUE)
 
-if (length(raw_fq_match) > 0 && file.exists(raw_fq_match[1])) {
+if (length(raw_fq_match) > 0 && file.exists(raw_fq_match[1]) && !file.exists("reports/rqc_report.html")) {
   cat("Menjalankan analisis kendali mutu awal dengan Rqc...\n")
   rqc_resultSet_before <- rqc(
     path = "raw_data",
@@ -369,7 +369,7 @@ get_phred_median <- function(counts) {
 }
 
 # Mengecek apakah pengujian perlu dijalankan langsung dari berkas FASTQ
-if (file.exists(fastq_path)) {
+if (file.exists(fastq_path) && !file.exists("results/filtering_summary.csv")) {
   total_reads <- 0L
   reads_pass <- setNames(numeric(length(thresholds)), paste0("Q", thresholds))
   phred_counts_filter <- matrix(
@@ -822,7 +822,7 @@ if (!file.exists(vcf_out_path)) {
     minReads           = 3,
     minAllelicFraction = 0.2,
     minBaseQuality     = 20,
-    nthreads           = 2
+    nthreads           = 1
   )
 } else {
   cat("Berkas VCF sudah tersedia di results/detected_variants.vcf.\n")
@@ -1071,16 +1071,22 @@ if (file.exists(sorted_bam_file) && file.exists(ref_fasta)) {
   
   for (i in seq_along(thr_list)) {
     out_vcf_temp <- paste0("results/detected_variants_Q", thr_list[i], ".vcf")
-    exactSNP(
-      readFile           = sorted_bam_file,
-      isBAM              = TRUE,
-      refGenomeFile      = ref_fasta,
-      outputFile         = out_vcf_temp,
-      minReads           = 3,
-      minAllelicFraction = 0.2,
-      minBaseQuality     = thr_list[i],
-      nthreads           = 2
-    )
+    if (!file.exists(out_vcf_temp)) {
+      if (thr_list[i] == 20 && file.exists(vcf_out_path)) {
+        file.copy(vcf_out_path, out_vcf_temp)
+      } else {
+        exactSNP(
+          readFile           = sorted_bam_file,
+          isBAM              = TRUE,
+          refGenomeFile      = ref_fasta,
+          outputFile         = out_vcf_temp,
+          minReads           = 3,
+          minAllelicFraction = 0.2,
+          minBaseQuality     = thr_list[i],
+          nthreads           = 2
+        )
+      }
+    }
     if (file.exists(out_vcf_temp)) {
       v_data <- tryCatch(
         read.table(out_vcf_temp, comment.char = "#", sep = "\t", quote = "", stringsAsFactors = FALSE),
