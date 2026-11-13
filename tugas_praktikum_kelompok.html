@@ -3189,73 +3189,8 @@ direkomendasikan.</li>
 <hr />
 </div>
 </div>
-<div id="bab-9-panduan-bahan-slide-presentasi-kelompok-mene-presentasi-maneh" class="section level1" number="10">
-<h1><span class="header-section-number">10</span> Bab 9: Panduan &amp;
-Bahan Slide Presentasi Kelompok (“Mene Presentasi Maneh”)</h1>
-<p>Bagian ini dirancang khusus sebagai panduan cepat, intisari poin
-slide, dan narasi pembicara (<em>speaker notes</em>) untuk presentasi di
-hadapan dosen pengampu dan asisten praktikum.</p>
-<pre><code>========================================================================================
-                  PANDUAN SLIDE PRESENTASI PRAKTIKUM VARIOMIK NGS
-========================================================================================
-
-SLIDE 1: JUDUL &amp; ANGGOTA KELOMPOK
-- Topik: Pipeline Analisis Variomik Next-Generation Sequencing (NGS)
-- Kasus: Deteksi dan Karakterisasi Varian Genomik Enterococcus faecium Aus0004
-- Pemateri: Muhammad Fahmi Syihab &amp; Tim Praktikum
-
-SLIDE 2: LATAR BELAKANG &amp; TUJUAN
-- Organisme: Enterococcus faecium Aus0004 (VRE, patogen nosokomial resisten vankomisin).
-- Genom: Kromosom sirkular ~2,99 Mb, GC content ~37,8%.
-- Dataset: SRA SRR8500451 (Illumina HiSeq, WGS).
-- Tujuan: Membangun pipeline mandiri di R untuk memproses data mentah menjadi profil mutasi terverifikasi.
-
-SLIDE 3: ARSITEKTUR PIPELINE
-- Alur 5 Tahap:
-  1. ENA API Data Download &amp; Quality Control (Rqc)
-  2. Multi-Threshold Filtering (Q15, Q20, Q25) &amp; Sliding Window Trimming (W=4, Qmin=20)
-  3. Reference Alignment (Rsubread::align) ke NC_017022.1
-  4. SAM -&gt; BAM -&gt; Sorted BAM + BAI &amp; Coverage Analysis
-  5. Variant Calling (exactSNP) &amp; Audit Ts/Tv Ratio
-
-SLIDE 4: KENDALI MUTU &amp; PRE-PROCESSING (HASIL GRAFIK 1 &amp; 2)
-- Fenomena: Kualitas sekuens menurun di ujung 3&#39; akibat dephasing kimiawi mesin Illumina.
-- Komparasi Multi-Threshold:
-  * Q15: Survival 97,9% (terlalu toleran, membawa noise).
-  * Q20: Survival 92,8% (pilihan terbaik / golden standard, Phred median naik drastis).
-  * Q25: Survival 68,3% (terlalu agresif, membuang data berharga).
-- Hasil Trimming: Menghasilkan clean_sample.fastq.gz dengan panjang read adaptif &gt;= 20 bp.
-
-SLIDE 5: HASIL PENJAJARAN &amp; CAKUPAN GENOM (HASIL GRAFIK 3)
-- Mapping Rate: Sangat tinggi (&gt;90%), membuktikan kesesuaian isolat dengan spesies E. faecium.
-- Efisiensi Kompresi: Konversi SAM (teks) ke Sorted BAM (biner terkompresi) menghemat &gt;75% memori disk.
-- Coverage Breadth: &gt;98% genom referensi tertutupi oleh read.
-- Mean Coverage Depth: Rerata kedalaman pembacaan yang stabil di seluruh kromosom.
-
-SLIDE 6: DETEKSI VARIAN &amp; VALIDASI TS/TV (HASIL GRAFIK 4)
-- Identifikasi: Varian dominan berupa SNV, disertai sebagian kecil InDel.
-- Kerapatan Varian: Sebaran merata di sepanjang koordinat genom kromosom Aus0004.
-- Validasi Mutasi (Rasio Ts/Tv):
-  * Rasio Transisi/Transversi terukur ~1,5 - 2,2.
-  * Makna Ilmiah: Berada jauh di atas rasio acak teoritis (0,5), memverifikasi bahwa mutasi yang terdeteksi adalah variasi biologis nyata, bukan artefak teknis sekuensing.
-
-SLIDE 7: TABEL LOG EVALUASI PIPELINE (AUDIT MENYELURUH)
-- Menampilkan tabel rangkuman Tahap 0 s/d Tahap 5 (Input, Output, Ukuran Berkas, dan Metrik Kunci).
-- Membuktikan pipeline berjalan secara efisien, terukur, dan reproducible.
-
-SLIDE 8: KESIMPULAN &amp; TANYA JAWAB (Q&amp;A DEFENSE READY)
-- Antisipasi Pertanyaan Dosen / Asisten:
-  Q1: &quot;Mengapa memilih Q20 bukan Q25?&quot;
-  A1: &quot;Q20 adalah golden standard kompromi bioinformatika. Q25 membuang &gt;31% read sehingga menurunkan coverage breadth dan berisiko memicu false negative mutasi.&quot;
-  Q2: &quot;Mengapa format BAM harus di-sort dan di-index sebelum variant calling?&quot;
-  A2: &quot;Algoritma variant calling membutuhkan koordinat kromosom yang urut. Indeks BAI memungkinkan random access cepat ke posisi lokus gen tanpa memindai seluruh genom.&quot;
-  Q3: &quot;Apa fungsi biologis rasio Ts/Tv?&quot;
-  A3: &quot;Sebagai kendali mutu biologis intrinsik. Transisi secara biokimia lebih sering terjadi daripada transversi. Rasio &gt;1,5 membuktikan panggilan varian akurat.&quot;
-========================================================================================</code></pre>
-<hr />
-</div>
-<div id="daftar-pustaka" class="section level1" number="11">
-<h1><span class="header-section-number">11</span> Daftar Pustaka</h1>
+<div id="daftar-pustaka" class="section level1" number="10">
+<h1><span class="header-section-number">10</span> Daftar Pustaka</h1>
 <ol style="list-style-type: decimal">
 <li>Andrews, S. (2010). <em>FastQC: A Quality Control Tool for High
 Throughput Sequence Data</em>. Babraham Bioinformatics, Babraham
